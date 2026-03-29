@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Usuários — HelpDesk</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'IBM Plex Sans', sans-serif; background: #0f172a; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen">
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+  <div id="app-layout" class="flex"></div>
+
+  <!-- Modal: Criar/Editar Usuário -->
+  <div id="modal-usuario" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+        <h2 class="font-semibold text-slate-100" id="modal-user-title">Novo Usuário</h2>
+        <button onclick="hideModal('modal-usuario')" class="text-slate-500 hover:text-slate-300 transition-colors">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <form id="form-usuario" class="p-6 space-y-4" novalidate>
+        <input type="hidden" id="user-id" />
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Username</label>
+          <input id="user-username" type="text" placeholder="nome.usuario"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">
+            Senha <span id="pw-hint" class="text-slate-600 normal-case">(deixe em branco para manter)</span>
+          </label>
+          <input id="user-password" type="password" placeholder="••••••••"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Cargo</label>
+            <select id="user-role"
+              class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+              <option value="dev">Dev</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Ativo</label>
+            <select id="user-active"
+              class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+              <option value="true">Sim</option>
+              <option value="false">Não</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" onclick="hideModal('modal-usuario')"
+            class="flex-1 px-4 py-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 text-sm transition-colors">
+            Cancelar
+          </button>
+          <button id="btn-salvar-usuario" type="submit"
+            class="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-colors shadow-lg shadow-indigo-500/20">
+            Salvar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    requireAuth();
+    renderLayout('usuarios.html');
+    document.getElementById('page-title').textContent = 'Usuários';
+
+    const currentUser = getUser();
+    const admin = isAdmin();
+    let allUsers = [];
+    let revealedPasswords = new Set(); // tracks which user IDs have password revealed
+
+    async function loadUsers() {
+      try {
+        allUsers = await api.getUsers();
+        renderUsers();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    function renderUsers() {
+      const content = document.getElementById('page-content');
+
+      const tableBody = document.getElementById('users-tbody');
+      if (!tableBody) {
+        content.innerHTML = `
+          <div class="flex items-center justify-between mb-6">
+            <div class="text-slate-400 text-sm">
+              ${allUsers.length} usuário${allUsers.length !== 1 ? 's' : ''} cadastrado${allUsers.length !== 1 ? 's' : ''}
+            </div>
+            ${admin ? `
+              <button id="btn-novo-usuario" onclick="openCreate()"
+                class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                </svg>
+                Novo Usuário
+              </button>` : ''}
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-xs text-slate-500 mono uppercase tracking-wider border-b border-slate-800">
+                    <th class="text-left px-5 py-3">Username</th>
+                    <th class="text-left px-5 py-3">Senha</th>
+                    <th class="text-left px-5 py-3">Cargo</th>
+                    <th class="text-left px-5 py-3">Ativo</th>
+                    <th class="text-left px-5 py-3">Criado em</th>
+                    <th class="text-left px-5 py-3">Atualizado em</th>
+                    ${admin ? '<th class="text-right px-5 py-3">Ações</th>' : ''}
+                  </tr>
+                </thead>
+                <tbody id="users-tbody"></tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+
+      document.getElementById('users-tbody').innerHTML = allUsers.map(u => {
+        const pwRevealed = revealedPasswords.has(u.id);
+        const pwDisplay = pwRevealed
+          ? `<span class="mono text-xs text-slate-300 break-all">${u.password}</span>`
+          : `<span class="text-slate-600 tracking-widest">••••••••</span>`;
+
+        const revealBtn = admin
+          ? `<button onclick="togglePassword('${u.id}')"
+               class="ml-2 text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-600 transition-colors mono">
+               ${pwRevealed ? 'ocultar' : 'ver'}
+             </button>`
+          : '';
+
+        const roleBadge = u.role === 'admin'
+          ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Admin</span>`
+          : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-700 text-slate-400 border border-slate-600">Dev</span>`;
+
+        const activeBadge = u.active
+          ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>S</span>`
+          : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-500/10 text-red-400 border border-red-500/20"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>N</span>`;
+
+        const actions = admin ? `
+          <td class="px-5 py-3">
+            <div class="flex items-center justify-end gap-2">
+              <button onclick="editUser('${u.id}')"
+                class="text-xs px-2.5 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">
+                Editar
+              </button>
+              ${u.id !== currentUser.id ? `
+                <button onclick="deleteUser('${u.id}')"
+                  class="text-xs px-2.5 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+                  Excluir
+                </button>` : ''}
+            </div>
+          </td>` : '';
+
+        return `
+          <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                  ${u.username[0].toUpperCase()}
+                </div>
+                <span class="text-slate-200 font-medium">${u.username}</span>
+                ${u.id === currentUser.id ? `<span class="text-xs text-indigo-400 mono">(você)</span>` : ''}
+              </div>
+            </td>
+            <td class="px-5 py-3">
+              <div class="flex items-center">
+                ${pwDisplay}
+                ${revealBtn}
+              </div>
+            </td>
+            <td class="px-5 py-3">${roleBadge}</td>
+            <td class="px-5 py-3">${activeBadge}</td>
+            <td class="px-5 py-3 text-slate-500 text-xs mono">${formatDate(u.createdAt)}</td>
+            <td class="px-5 py-3 text-slate-500 text-xs mono">${formatDate(u.updatedAt)}</td>
+            ${actions}
+          </tr>`;
+      }).join('');
+    }
+
+    function togglePassword(userId) {
+      if (revealedPasswords.has(userId)) {
+        revealedPasswords.delete(userId);
+      } else {
+        revealedPasswords.add(userId);
+      }
+      renderUsers();
+    }
+
+    function openCreate() {
+      if (!admin) { toast('Apenas administradores podem criar usuários', 'error'); return; }
+      document.getElementById('modal-user-title').textContent = 'Novo Usuário';
+      document.getElementById('user-id').value = '';
+      document.getElementById('user-username').value = '';
+      document.getElementById('user-password').value = '';
+      document.getElementById('user-role').value = 'dev';
+      document.getElementById('user-active').value = 'true';
+      document.getElementById('pw-hint').classList.add('hidden');
+      showModal('modal-usuario');
+    }
+
+    function editUser(id) {
+      if (!admin) return;
+      const u = allUsers.find(x => x.id === id);
+      if (!u) return;
+      document.getElementById('modal-user-title').textContent = 'Editar Usuário';
+      document.getElementById('user-id').value = u.id;
+      document.getElementById('user-username').value = u.username;
+      document.getElementById('user-password').value = '';
+      document.getElementById('user-role').value = u.role;
+      document.getElementById('user-active').value = String(u.active);
+      document.getElementById('pw-hint').classList.remove('hidden');
+      showModal('modal-usuario');
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('Excluir este usuário? Esta ação não pode ser desfeita.')) return;
+      try {
+        await api.deleteUser(id);
+        toast('Usuário excluído', 'success');
+        loadUsers();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    document.getElementById('form-usuario').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('user-id').value;
+      const btn = document.getElementById('btn-salvar-usuario');
+      const data = {
+        username: document.getElementById('user-username').value.trim(),
+        role: document.getElementById('user-role').value,
+        active: document.getElementById('user-active').value === 'true',
+      };
+      const pw = document.getElementById('user-password').value;
+      if (pw) data.password = pw;
+
+      if (!data.username) { toast('Informe o username', 'error'); return; }
+      if (!id && !pw) { toast('Informe uma senha', 'error'); return; }
+
+      setLoading(btn, true);
+      try {
+        if (id) {
+          await api.updateUser(id, data);
+          toast('Usuário atualizado!', 'success');
+        } else {
+          await api.createUser(data);
+          toast('Usuário criado!', 'success');
+        }
+        hideModal('modal-usuario');
+        loadUsers();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>

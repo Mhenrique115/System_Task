@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chamados — HelpDesk</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'IBM Plex Sans', sans-serif; background: #0f172a; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+  </style>
+</head>
+<body class="text-slate-100 min-h-screen">
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+  <div id="app-layout" class="flex"></div>
+
+  <!-- Modal: Novo Chamado -->
+  <div id="modal-chamado" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+        <h2 class="font-semibold text-slate-100" id="modal-title">Novo Chamado</h2>
+        <button onclick="hideModal('modal-chamado')" class="text-slate-500 hover:text-slate-300 transition-colors">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <form id="form-chamado" class="p-6 space-y-4" novalidate>
+        <input type="hidden" id="chamado-id" />
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Nome do Chamado</label>
+          <input id="chamado-nome" type="text" placeholder="Descreva o chamado..."
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Cliente</label>
+          <input id="chamado-cliente" type="text" placeholder="Nome do cliente"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Responsável</label>
+          <select id="chamado-usuario"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs mono text-slate-400 uppercase tracking-wider mb-1.5">Valor (R$)</label>
+          <input id="chamado-valor" type="number" min="0" step="0.01" placeholder="0,00"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" onclick="hideModal('modal-chamado')"
+            class="flex-1 px-4 py-2.5 rounded-lg border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 text-sm transition-colors">
+            Cancelar
+          </button>
+          <button id="btn-salvar-chamado" type="submit"
+            class="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-colors shadow-lg shadow-indigo-500/20">
+            Salvar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    requireAuth();
+    renderLayout('chamados.html');
+    document.getElementById('page-title').textContent = 'Chamados';
+
+    let allChamados = [];
+    let allUsers = [];
+
+    async function loadPage() {
+      const [chamados, users] = await Promise.all([api.getChamados(), api.getUsers()]);
+      allChamados = chamados;
+      allUsers = users.filter(u => u.active);
+      renderTable(allChamados);
+      populateUserSelect();
+    }
+
+    function populateUserSelect() {
+      const sel = document.getElementById('chamado-usuario');
+      sel.innerHTML = '<option value="">Selecione...</option>' +
+        allUsers.map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+    }
+
+    function renderTable(chamados) {
+      const content = document.getElementById('page-content');
+      const filterVal = document.getElementById('filter-status')?.value || '';
+      const searchVal = document.getElementById('search-input')?.value?.toLowerCase() || '';
+
+      const filtered = chamados.filter(c => {
+        const matchStatus = !filterVal || c.status === filterVal;
+        const matchSearch = !searchVal ||
+          c.nome.toLowerCase().includes(searchVal) ||
+          c.cliente.toLowerCase().includes(searchVal) ||
+          c.usuario.username.toLowerCase().includes(searchVal);
+        return matchStatus && matchSearch;
+      });
+
+      const tableBody = document.getElementById('chamados-tbody');
+      if (!tableBody) {
+        // First render — build the whole shell
+        content.innerHTML = `
+          <!-- Header bar -->
+          <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
+            <div class="flex items-center gap-3">
+              <input id="search-input" type="text" placeholder="Buscar chamado, cliente..."
+                class="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-64" />
+              <select id="filter-status"
+                class="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500">
+                <option value="">Todos</option>
+                <option value="aberto">Aberto</option>
+                <option value="finalizado">Finalizado</option>
+              </select>
+            </div>
+            <button id="btn-novo-chamado"
+              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+              </svg>
+              Novo Chamado
+            </button>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-xs text-slate-500 mono uppercase tracking-wider border-b border-slate-800 bg-slate-900/80">
+                    <th class="text-left px-5 py-3">ID</th>
+                    <th class="text-left px-5 py-3">Nome</th>
+                    <th class="text-left px-5 py-3">Responsável</th>
+                    <th class="text-left px-5 py-3">Cliente</th>
+                    <th class="text-left px-5 py-3">Início</th>
+                    <th class="text-left px-5 py-3">Fim</th>
+                    <th class="text-right px-5 py-3">Tempo</th>
+                    <th class="text-left px-5 py-3">Status</th>
+                    <th class="text-right px-5 py-3">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="chamados-tbody"></tbody>
+              </table>
+            </div>
+          </div>`;
+
+        document.getElementById('btn-novo-chamado').addEventListener('click', openCreate);
+        document.getElementById('search-input').addEventListener('input', () => renderTable(allChamados));
+        document.getElementById('filter-status').addEventListener('change', () => renderTable(allChamados));
+      }
+
+      document.getElementById('chamados-tbody').innerHTML = filtered.length
+        ? filtered.map(c => `
+            <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors group">
+              <td class="px-5 py-3">
+                <a href="chamado-detalhe.html?id=${c.id}"
+                   class="text-indigo-400 hover:text-indigo-300 mono text-xs underline underline-offset-2">
+                  ${c.id.slice(0, 8)}…
+                </a>
+              </td>
+              <td class="px-5 py-3 text-slate-200 max-w-xs">
+                <a href="chamado-detalhe.html?id=${c.id}" class="hover:text-indigo-300 transition-colors line-clamp-1">${c.nome}</a>
+              </td>
+              <td class="px-5 py-3 text-slate-400">${c.usuario.username}</td>
+              <td class="px-5 py-3 text-slate-400">${c.cliente}</td>
+              <td class="px-5 py-3 text-slate-500 text-xs mono">${formatDate(c.dtInicio)}</td>
+              <td class="px-5 py-3 text-slate-500 text-xs mono">${c.dtFim ? formatDate(c.dtFim) : '—'}</td>
+              <td class="px-5 py-3 text-right mono text-xs text-slate-400">${formatDuration(c.tempoTotalMinutos)}</td>
+              <td class="px-5 py-3">${statusBadge(c.status)}</td>
+              <td class="px-5 py-3">
+                <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  ${c.status === 'aberto' ? `
+                    <button onclick="finalizarChamado('${c.id}')"
+                      class="text-xs px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors">
+                      Finalizar
+                    </button>` : ''}
+                  <button onclick="editChamado('${c.id}')"
+                    class="text-xs px-2.5 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">
+                    Editar
+                  </button>
+                  <button onclick="deleteChamado('${c.id}')"
+                    class="text-xs px-2.5 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+                    Excluir
+                  </button>
+                </div>
+              </td>
+            </tr>`).join('')
+        : `<tr><td colspan="9" class="px-5 py-16 text-center text-slate-500">Nenhum chamado encontrado</td></tr>`;
+    }
+
+    function openCreate() {
+      document.getElementById('modal-title').textContent = 'Novo Chamado';
+      document.getElementById('chamado-id').value = '';
+      document.getElementById('chamado-nome').value = '';
+      document.getElementById('chamado-cliente').value = '';
+      document.getElementById('chamado-usuario').value = '';
+      document.getElementById('chamado-valor').value = '';
+      showModal('modal-chamado');
+    }
+
+    function editChamado(id) {
+      const c = allChamados.find(x => x.id === id);
+      if (!c) return;
+      document.getElementById('modal-title').textContent = 'Editar Chamado';
+      document.getElementById('chamado-id').value = c.id;
+      document.getElementById('chamado-nome').value = c.nome;
+      document.getElementById('chamado-cliente').value = c.cliente;
+      document.getElementById('chamado-usuario').value = c.usuarioId;
+      document.getElementById('chamado-valor').value = c.valor;
+      showModal('modal-chamado');
+    }
+
+    async function finalizarChamado(id) {
+      if (!confirm('Finalizar este chamado?')) return;
+      try {
+        await api.finalizarChamado(id);
+        toast('Chamado finalizado!', 'success');
+        loadPage();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    async function deleteChamado(id) {
+      if (!confirm('Excluir este chamado? Esta ação não pode ser desfeita.')) return;
+      try {
+        await api.deleteChamado(id);
+        toast('Chamado excluído', 'success');
+        loadPage();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    document.getElementById('form-chamado').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('chamado-id').value;
+      const btn = document.getElementById('btn-salvar-chamado');
+      const data = {
+        nome: document.getElementById('chamado-nome').value.trim(),
+        cliente: document.getElementById('chamado-cliente').value.trim(),
+        usuarioId: document.getElementById('chamado-usuario').value,
+        valor: parseFloat(document.getElementById('chamado-valor').value) || 0,
+      };
+
+      if (!data.nome || !data.cliente || !data.usuarioId) {
+        toast('Preencha todos os campos obrigatórios', 'error');
+        return;
+      }
+
+      setLoading(btn, true);
+      try {
+        if (id) {
+          await api.updateChamado(id, data);
+          toast('Chamado atualizado!', 'success');
+        } else {
+          await api.createChamado(data);
+          toast('Chamado criado!', 'success');
+        }
+        hideModal('modal-chamado');
+        loadPage();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    loadPage();
+  </script>
+</body>
+</html>
