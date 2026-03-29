@@ -10,10 +10,6 @@ Interface web do sistema de gestão de chamados (Help Desk), construída com HTM
 
 **https://mhenrique115.github.io/System_Task/**
 
-| Usuário | Senha | Cargo |
-|---------|-------|-------|
-| admin | admin123 | Admin |
-
 ---
 
 ## 🛠️ Tecnologias
